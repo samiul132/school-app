@@ -33,7 +33,7 @@ interface RoutineDetail {
   class_routine_id: number;
   subject_id: number;
   teacher_id: number;
-  period_number: string | number; // Can be string or number
+  period_number: string | number;
   day_name: string;
   time: string;
   subject?: { 
@@ -179,7 +179,7 @@ export default function ClassRoutineScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View className={`rounded-xl overflow-hidden ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
             <View className="flex-row border-b" style={{ borderColor: '#666' }}>
-              <View className="w-24 p-3 border-r justify-center items-center" style={{ borderColor: '#666' }}>
+              <View className="w-36 p-3 border-r justify-center items-center" style={{ borderColor: '#666' }}>
                 <Text className={`font-bold text-center ${isDark ? 'text-white' : 'text-gray-900'}`}>Day</Text>
               </View>
               {Array.from({ length: totalPeriods }, (_, i) => i + 1).map(period => (
@@ -204,7 +204,7 @@ export default function ClassRoutineScreen() {
                 className={`flex-row ${dayIndex < activeDays.length - 1 ? 'border-b' : ''}`}
                 style={{ borderColor: '#666' }}
               >
-                <View className="w-24 p-3 border-r justify-center items-center" style={{ borderColor: '#666' }}>
+                <View className="w-36 p-3 border-r justify-center items-center" style={{ borderColor: '#666' }}>
                   <Text className={`font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{day}</Text>
                 </View>
                 {Array.from({ length: totalPeriods }, (_, i) => i + 1).map(period => {
