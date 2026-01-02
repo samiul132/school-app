@@ -3,15 +3,21 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   Image,
-  Modal,
   ScrollView,
   Text,
   TouchableOpacity,
   View,
   useColorScheme,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import type { Href } from 'expo-router';
 import CommonLayout from '../components/CommonLayout';
-import { getStudentProfileByIdApi, getUserData } from '../config/api';
+import { 
+  getStudentProfileByIdApi, 
+  getUserData,
+  getStudentFeeSummaryApi,
+  apiRequest
+} from '../config/api';
 
 import '../global.css';
 
@@ -20,11 +26,16 @@ const { width } = Dimensions.get('window');
 export default function DashboardScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const router = useRouter();
   const [userData, setUserData] = useState<any>(null);
   const [studentData, setStudentData] = useState<any>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
-  const [routineModalVisible, setRoutineModalVisible] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const [feeStats, setFeeStats] = useState({
+    totalDue: 0,
+  });
+  const [todaysClasses, setTodaysClasses] = useState<any[]>([]);
+  const [attendancePercentage, setAttendancePercentage] = useState('0');
 
   useEffect(() => {
     loadUserData();
@@ -49,11 +60,23 @@ export default function DashboardScreen() {
       if (user) {
         setUserData(user);
         
-        // If user is student, fetch student profile
         if (user.type === 'STUDENT' && user.student_id) {
           const studentResponse = await getStudentProfileByIdApi(user.student_id);
           if (studentResponse.success) {
             setStudentData(studentResponse.data);
+            
+            const classWiseStudentId = studentResponse.data.class_wise_data?.[0]?.id;
+            const classId = studentResponse.data.class_wise_data?.[0]?.class?.id;
+            const sectionId = studentResponse.data.class_wise_data?.[0]?.section?.id;
+            
+            if (classWiseStudentId) {
+              loadFeeSummary(classWiseStudentId);
+              loadAttendanceData(classWiseStudentId);
+            }
+            
+            if (classId && sectionId) {
+              loadClassRoutines(classId, sectionId);
+            }
           }
         }
       }
@@ -62,46 +85,156 @@ export default function DashboardScreen() {
     }
   };
 
-  // Refresh function to pass to CommonLayout
+  const loadFeeSummary = async (classWiseStudentId: number) => {
+    try {
+      const feeSummary = await getStudentFeeSummaryApi(classWiseStudentId);
+      if (feeSummary.success) {
+        setFeeStats({
+          totalDue: feeSummary.data.total_due,
+        });
+      }
+    } catch (error) {
+      console.error('Error loading fee summary:', error);
+    }
+  };
+
+  const loadAttendanceData = async (classWiseStudentId: number) => {
+    try {
+      const AsyncStorage = await import('@react-native-async-storage/async-storage');
+      const token = await AsyncStorage.default.getItem('auth_token');
+      
+      const response = await fetch(
+        `https://smartcampus.designcodeit.com/api/student-attendance?class_wise_student_id=${classWiseStudentId}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+          }
+        }
+      );
+      
+      const data = await response.json();
+      
+      if (data.success && data.data.data) {
+        const attendanceRecords = data.data.data;
+        const totalDays = attendanceRecords.length;
+        const presentDays = attendanceRecords.filter(
+          (record: any) => record.status === 'Present'
+        ).length;
+        
+        const percentage = totalDays > 0 
+          ? Math.round((presentDays / totalDays) * 100) 
+          : 0;
+        
+        setAttendancePercentage(percentage.toString());
+      }
+    } catch (error) {
+      console.error('Error loading attendance data:', error);
+      setAttendancePercentage('95');
+    }
+  };
+
+  const loadClassRoutines = async (classId: number, sectionId: number) => {
+    try {
+      const response = await apiRequest('/class-routines', 'GET');
+      
+      if (response.success) {
+        let routinesData = [];
+        
+        if (response.data?.data) {
+          routinesData = Array.isArray(response.data.data) 
+            ? response.data.data 
+            : [response.data.data];
+        } else if (response.data) {
+          routinesData = Array.isArray(response.data) 
+            ? response.data 
+            : [response.data];
+        }
+        
+        // Find routine matching student's class and section
+        const studentRoutine = routinesData.find(
+          (routine: any) => routine.class_id === classId && routine.section_id === sectionId
+        );
+        
+        if (studentRoutine && studentRoutine.details) {
+          // Get current day name
+          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const today = days[new Date().getDay()];
+          
+          // Check if today is an off day
+          const offDays = studentRoutine.off_day 
+            ? studentRoutine.off_day.split(',').map((d: string) => d.trim()) 
+            : [];
+          
+          if (offDays.includes(today)) {
+            setTodaysClasses([
+              { id: 0, subject: 'No classes today (Off Day)', time: '', room: '' }
+            ]);
+            return;
+          }
+          
+          // Filter details for today
+          const todayDetails = studentRoutine.details.filter(
+            (detail: any) => detail.day_name === today
+          );
+          
+          if (todayDetails.length > 0) {
+            // Sort by period number
+            const sortedDetails = todayDetails.sort((a: any, b: any) => 
+              parseInt(String(a.period_number)) - parseInt(String(b.period_number))
+            );
+            
+            const formattedClasses = sortedDetails.map((detail: any) => ({
+              id: detail.id,
+              subject: detail.subject?.subject_name || 'Subject',
+              time: detail.time || 'N/A',
+              room: `Period ${detail.period_number}`,
+              teacher: detail.teacher 
+                ? `${detail.teacher.first_name} ${detail.teacher.last_name || ''}`.trim()
+                : '',
+            }));
+            
+            setTodaysClasses(formattedClasses);
+          } else {
+            setTodaysClasses([
+              { id: 0, subject: 'No classes scheduled for today', time: '', room: '' }
+            ]);
+          }
+        } else {
+          setTodaysClasses([
+            { id: 0, subject: 'No routine available', time: '', room: '' }
+          ]);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading class routines:', error);
+      setTodaysClasses([
+        { id: 0, subject: 'Unable to load schedule', time: '', room: '' }
+      ]);
+    }
+  };
+
   const handleRefresh = async () => {
     await loadUserData();
   };
 
-  // Class Routine Data
-  const classRoutine = [
-    { day: 'Saturday', classes: [
-      { time: '9:00 AM', subject: 'Mathematics', room: '301' },
-      { time: '10:15 AM', subject: 'Physics', room: 'Lab 2' },
-      { time: '11:30 AM', subject: 'English', room: '302' },
-      { time: '1:30 PM', subject: 'Biology', room: 'Lab 1' },
-    ]},
-    { day: 'Sunday', classes: [
-      { time: '9:00 AM', subject: 'Chemistry', room: 'Lab 3' },
-      { time: '10:15 AM', subject: 'Bangla', room: '303' },
-      { time: '11:30 AM', subject: 'ICT', room: 'Computer Lab' },
-      { time: '1:30 PM', subject: 'History', room: '304' },
-    ]},
-    { day: 'Monday', classes: [
-      { time: '9:00 AM', subject: 'Mathematics', room: '301' },
-      { time: '10:15 AM', subject: 'English', room: '302' },
-      { time: '11:30 AM', subject: 'Physics', room: 'Lab 2' },
-      { time: '1:30 PM', subject: 'PE', room: 'Ground' },
-    ]},
-  ];
-
   const handleCardClick = (cardId: number) => {
-    if (cardId === 4) {
-      // Class Routine card
-      setRoutineModalVisible(true);
+    if (cardId === 3) {
+      router.push('/fees' as Href);
+    } else if (cardId === 4) {
+      router.push('/classroutine' as Href);
+    } else if (cardId === 1) {
+      router.push('/attendance' as Href);
+    } else if (cardId === 2) {
+      router.push('/upcooming' as Href);
     }
   };
 
-  // Dashboard Cards
   const dashboardCards = [
     {
       id: 1,
       title: 'Attendance',
-      value: '95%',
+      value: `${attendancePercentage}%`,
       icon: 'calendar',
       color: isDark ? '#EF4444' : '#DC2626',
       bgColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(220, 38, 38, 0.08)',
@@ -117,7 +250,7 @@ export default function DashboardScreen() {
     {
       id: 3,
       title: 'Due Fees',
-      value: '৳ 5,000',
+      value: `৳ ${feeStats.totalDue.toLocaleString()}`,
       icon: 'cash',
       color: '#F59E0B',
       bgColor: isDark ? 'rgba(245, 158, 11, 0.1)' : 'rgba(245, 158, 11, 0.08)',
@@ -132,7 +265,6 @@ export default function DashboardScreen() {
     },
   ];
 
-  // Quick Actions
   const quickActions = [
     { id: 1, title: 'Timetable', icon: 'time', color: isDark ? '#EF4444' : '#DC2626' },
     { id: 2, title: 'Results', icon: 'clipboard', color: '#16A34A' },
@@ -140,15 +272,6 @@ export default function DashboardScreen() {
     { id: 4, title: 'Materials', icon: 'book-outline', color: '#F59E0B' },
   ];
 
-  // Today's Classes
-  const todaysClasses = [
-    { id: 1, subject: 'Mathematics', time: '9:00 AM', room: '301' },
-    { id: 2, subject: 'Physics', time: '10:15 AM', room: 'Lab 2' },
-    { id: 3, subject: 'English', time: '11:30 AM', room: '302' },
-    { id: 4, subject: 'Biology', time: '1:30 PM', room: 'Lab 1' },
-  ];
-
-  // Image Slider Data
   const sliderImages = [
     {
       id: 1,
@@ -185,7 +308,6 @@ export default function DashboardScreen() {
         } p-4`}>
           <View className="flex-row justify-between items-center mb-3">
             <View className="flex-row items-center flex-1 gap-3">
-              {/* Student Image or Icon */}
               {studentData?.student_image_url ? (
                 <Image 
                   source={{ uri: studentData.student_image_url }}
@@ -281,7 +403,7 @@ export default function DashboardScreen() {
             <TouchableOpacity
               key={card.id}
               onPress={() => handleCardClick(card.id)}
-              activeOpacity={card.id === 4 ? 0.7 : 1}
+              activeOpacity={0.7}
               className={`w-[48%] rounded-2xl border mb-3 p-4 items-center ${
                 isDark 
                   ? 'bg-gray-800 border-gray-700' 
@@ -316,7 +438,7 @@ export default function DashboardScreen() {
           }`}>
             Today&apos;s Classes
           </Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/classroutine' as Href)}>
             <Text className={`text-sm font-semibold ${
               isDark ? 'text-primary-400' : 'text-primary-600'
             }`}>
@@ -333,33 +455,46 @@ export default function DashboardScreen() {
           {todaysClasses.map((cls, index) => (
             <View
               key={cls.id}
-              className={`flex-row justify-between items-center p-4 ${
+              className={`p-4 ${
                 index < todaysClasses.length - 1 
                   ? `border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}` 
                   : ''
               }`}
             >
-              <View className="flex-row items-center gap-3 flex-1">
-                <View className={`w-2 h-2 rounded-full ${
-                  isDark ? 'bg-primary-500' : 'bg-primary-600'
-                }`} />
-                <Text className={`text-base font-semibold flex-1 ${
-                  isDark ? 'text-white' : 'text-gray-900'
-                }`} numberOfLines={1}>
-                  {cls.subject}
-                </Text>
-              </View>
-              <View className="items-end">
-                <Text className={`text-sm font-semibold mb-1 ${
-                  isDark ? 'text-primary-400' : 'text-primary-600'
-                }`}>
-                  {cls.time}
-                </Text>
-                <Text className={`text-xs font-medium ${
-                  isDark ? 'text-gray-400' : 'text-gray-600'
-                }`}>
-                  {cls.room}
-                </Text>
+              <View className="flex-row justify-between items-center">
+                <View className="flex-row items-center gap-3 flex-1">
+                  <View className={`w-2 h-2 rounded-full ${
+                    isDark ? 'bg-primary-500' : 'bg-primary-600'
+                  }`} />
+                  <View className="flex-1">
+                    <Text className={`text-base font-semibold ${
+                      isDark ? 'text-white' : 'text-gray-900'
+                    }`} numberOfLines={1}>
+                      {cls.subject}
+                    </Text>
+                    {cls.teacher && (
+                      <Text className={`text-xs mt-1 ${
+                        isDark ? 'text-gray-400' : 'text-gray-600'
+                      }`} numberOfLines={1}>
+                        {cls.teacher}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+                {cls.time && (
+                  <View className="items-end ml-2">
+                    <Text className={`text-sm font-semibold mb-1 ${
+                      isDark ? 'text-primary-400' : 'text-primary-600'
+                    }`}>
+                      {cls.time}
+                    </Text>
+                    <Text className={`text-xs font-medium ${
+                      isDark ? 'text-gray-400' : 'text-gray-600'
+                    }`}>
+                      {cls.room}
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
           ))}
@@ -448,7 +583,6 @@ export default function DashboardScreen() {
             ))}
           </ScrollView>
 
-          {/* Slider Dots */}
           <View className="flex-row justify-center items-center mt-3 gap-2">
             {sliderImages.map((_, index) => (
               <View
@@ -462,94 +596,6 @@ export default function DashboardScreen() {
             ))}
           </View>
         </View>
-
-        {/* Class Routine Modal */}
-        <Modal
-          visible={routineModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setRoutineModalVisible(false)}
-        >
-          <View className="flex-1 justify-center items-center bg-black/50 px-4">
-            <View className={`w-full max-w-md rounded-3xl overflow-hidden ${
-              isDark ? 'bg-gray-800' : 'bg-white'
-            }`}>
-              {/* Header */}
-              <View className="bg-primary-600 px-6 py-5 flex-row justify-between items-center">
-                <View className="flex-row items-center">
-                  <Ionicons name="calendar-outline" size={24} color="white" />
-                  <Text className="text-white text-xl font-bold ml-3">
-                    Class Routine
-                  </Text>
-                </View>
-                <TouchableOpacity onPress={() => setRoutineModalVisible(false)}>
-                  <Ionicons name="close-circle" size={28} color="white" />
-                </TouchableOpacity>
-              </View>
-
-              {/* Content */}
-              <ScrollView 
-                className="max-h-96 p-6"
-                showsVerticalScrollIndicator={false}
-              >
-                {classRoutine.map((day, dayIndex) => (
-                  <View key={dayIndex} className="mb-6">
-                    <Text className={`text-lg font-bold mb-3 ${
-                      isDark ? 'text-white' : 'text-gray-900'
-                    }`}>
-                      {day.day}
-                    </Text>
-                    <View className={`rounded-xl border ${
-                      isDark ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
-                    }`}>
-                      {day.classes.map((cls, clsIndex) => (
-                        <View
-                          key={clsIndex}
-                          className={`flex-row justify-between items-center p-3 ${
-                            clsIndex < day.classes.length - 1
-                              ? `border-b ${isDark ? 'border-gray-600' : 'border-gray-200'}`
-                              : ''
-                          }`}
-                        >
-                          <View className="flex-1">
-                            <Text className={`text-base font-semibold ${
-                              isDark ? 'text-white' : 'text-gray-900'
-                            }`}>
-                              {cls.subject}
-                            </Text>
-                            <Text className={`text-xs mt-1 ${
-                              isDark ? 'text-gray-400' : 'text-gray-600'
-                            }`}>
-                              {cls.room}
-                            </Text>
-                          </View>
-                          <Text className={`text-sm font-semibold ${
-                            isDark ? 'text-primary-400' : 'text-primary-600'
-                          }`}>
-                            {cls.time}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                ))}
-              </ScrollView>
-
-              {/* Footer */}
-              <View className={`px-6 py-4 border-t ${
-                isDark ? 'border-gray-700' : 'border-gray-200'
-              }`}>
-                <TouchableOpacity
-                  onPress={() => setRoutineModalVisible(false)}
-                  className="bg-primary-600 rounded-xl py-3 items-center"
-                  activeOpacity={0.8}
-                >
-                  <Text className="text-white font-semibold text-base">Close</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
       </ScrollView>
     </CommonLayout>
   );

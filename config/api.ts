@@ -459,3 +459,12 @@ export const getClassRoutinesApi = async () => {
 export const getClassRoutineByIdApi = async (routineId: number | string) => {
   return apiRequest(`/class-routines/${routineId}`, 'GET');
 };
+
+
+/**
+ * Get student attendance records - Clean version
+ */
+export const getStudentAttendanceApi = async (classWiseStudentId: number) => {
+  const queryString = `?class_wise_student_id=${classWiseStudentId}`;
+  return apiRequest(`/student-attendance${queryString}`, 'GET');
+};

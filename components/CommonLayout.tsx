@@ -10,6 +10,7 @@ import {
   Modal,
   RefreshControl,
   ScrollView,
+  StatusBar,  // এটি import করুন
   Text,
   TouchableOpacity,
   View,
@@ -233,6 +234,12 @@ export default function CommonLayout({
 
   return (
     <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+      {/* Status Bar - এটি যোগ করুন */}
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={isDark ? '#1F2937' : '#FFFFFF'}
+      />
+
       {/* Header */}
       <View className={`px-4 py-4 flex-row items-center justify-between shadow-sm ${
         isDark ? 'bg-gray-800' : 'bg-white'
