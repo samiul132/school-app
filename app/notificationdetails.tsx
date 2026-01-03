@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     RefreshControl,
     ScrollView,
@@ -10,6 +10,8 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getPostNotificationsApi, markNotificationAsReadApi } from '../config/api';
+import Toast from 'react-native-toast-message';
 
 interface Notification {
   id: number;
@@ -29,102 +31,108 @@ export default function NotificationDetails() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'unread'>('all');
-
-  // Sample notifications - replace with API call
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: 1,
-      title: 'Fee Payment Reminder',
-      message: 'Your monthly fee payment is due in 3 days',
-      fullMessage: 'Dear Student, this is a reminder that your monthly tuition fee for December 2025 is due in 3 days. Please make the payment before the due date to avoid late fees. You can pay online or visit the school office.',
-      time: '2 hours ago',
-      date: 'Dec 23, 2025',
-      read: false,
-      icon: 'cash-outline',
-      iconColor: '#DC2626',
-      category: 'fee',
-    },
-    {
-      id: 2,
-      title: 'New Notice Published',
-      message: 'Check the notice board for important updates',
-      fullMessage: 'A new notice has been published on the notice board regarding the upcoming winter break schedule. All students are requested to check the notice board for complete details.',
-      time: '5 hours ago',
-      date: 'Dec 23, 2025',
-      read: false,
-      icon: 'document-text-outline',
-      iconColor: '#2563EB',
-      category: 'notice',
-    },
-    {
-      id: 3,
-      title: 'Exam Schedule Updated',
-      message: 'Mid-term exam schedule has been updated',
-      fullMessage: 'The mid-term examination schedule has been revised. The new dates are: Math - Jan 5, Science - Jan 7, English - Jan 9. Please check the updated schedule on the school website.',
-      time: '1 day ago',
-      date: 'Dec 22, 2025',
-      read: true,
-      icon: 'calendar-outline',
-      iconColor: '#16A34A',
-      category: 'exam',
-    },
-    {
-      id: 4,
-      title: 'Sports Day Event',
-      message: 'Annual sports day scheduled for next month',
-      fullMessage: 'We are excited to announce that our Annual Sports Day will be held on January 15, 2026. All students are encouraged to participate. Registration forms are available at the sports office.',
-      time: '2 days ago',
-      date: 'Dec 21, 2025',
-      read: true,
-      icon: 'trophy-outline',
-      iconColor: '#F59E0B',
-      category: 'event',
-    },
-    {
-      id: 5,
-      title: 'Parent-Teacher Meeting',
-      message: 'Scheduled for next week',
-      fullMessage: 'Dear Parents and Students, a parent-teacher meeting has been scheduled for December 28, 2025, from 10:00 AM to 2:00 PM. Please ensure your attendance to discuss academic progress.',
-      time: '3 days ago',
-      date: 'Dec 20, 2025',
-      read: true,
-      icon: 'people-outline',
-      iconColor: '#8B5CF6',
-      category: 'event',
-    },
-  ]);
-
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [expandedNotification, setExpandedNotification] = useState<number | null>(null);
 
-  const onRefresh = () => {
+  useEffect(() => {
+    loadNotifications();
+  }, []);
+
+  const getCurrentYear = () => new Date().getFullYear();
+
+  const getTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    
+    if (diffInSeconds < 60) return 'Just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
+    return date.toLocaleDateString();
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
+  };
+
+  const getCategoryFromTitle = (title: string): Notification['category'] => {
+    const lowerTitle = title.toLowerCase();
+    if (lowerTitle.includes('fee') || lowerTitle.includes('payment')) return 'fee';
+    if (lowerTitle.includes('exam') || lowerTitle.includes('test')) return 'exam';
+    if (lowerTitle.includes('notice') || lowerTitle.includes('announcement')) return 'notice';
+    if (lowerTitle.includes('event') || lowerTitle.includes('sports') || lowerTitle.includes('meeting')) return 'event';
+    return 'general';
+  };
+
+  const loadNotifications = async () => {
+    try {
+      const response = await getPostNotificationsApi();
+      if (response.success && response.data) {
+        const currentYear = getCurrentYear();
+        
+        // Filter notifications from current year only
+        const currentYearNotifications = response.data
+          .filter((item: any) => {
+            const notificationYear = new Date(item.created_at).getFullYear();
+            return notificationYear === currentYear;
+          })
+          .map((item: any, index: number) => ({
+            id: item.id,
+            title: item.name,
+            message: item.description || 'New notification',
+            fullMessage: item.description || 'New notification',
+            time: getTimeAgo(item.created_at),
+            date: formatDate(item.created_at),
+            read: item.is_read || false,
+            icon: 'notifications-outline',
+            iconColor: index % 5 === 0 ? '#DC2626' : 
+                      index % 5 === 1 ? '#2563EB' : 
+                      index % 5 === 2 ? '#16A34A' : 
+                      index % 5 === 3 ? '#F59E0B' : '#8B5CF6',
+            category: getCategoryFromTitle(item.name),
+          }))
+          .sort((a: any, b: any) => {
+            // Sort by created_at date (newest first)
+            return new Date(b.date).getTime() - new Date(a.date).getTime();
+          });
+        
+        setNotifications(currentYearNotifications);
+      }
+    } catch (error) {
+      console.error('Error loading notifications:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: 'Failed to load notifications',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    }
+  };
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadNotifications();
+    setRefreshing(false);
   };
 
-  const markAsRead = (id: number) => {
-    setNotifications(prev =>
-      prev.map(notif =>
-        notif.id === id ? { ...notif, read: true } : notif
-      )
-    );
-    // Keep the notification expanded after marking as read
-    // Don't close it, just update the state
-  };
-
-  const markAllAsRead = () => {
-    setNotifications(prev =>
-      prev.map(notif => ({ ...notif, read: true }))
-    );
-    // Close any expanded notification
-    setExpandedNotification(null);
-  };
-
-  const deleteNotification = (id: number) => {
-    setNotifications(prev => prev.filter(notif => notif.id !== id));
+  const markAsRead = async (id: number) => {
+    try {
+      await markNotificationAsReadApi(id);
+      setNotifications(prev =>
+        prev.map(notif =>
+          notif.id === id ? { ...notif, read: true } : notif
+        )
+      );
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
   };
 
   const toggleExpand = (id: number) => {
@@ -132,13 +140,12 @@ export default function NotificationDetails() {
       setExpandedNotification(null);
     } else {
       setExpandedNotification(id);
-      markAsRead(id);
+      const notification = notifications.find(n => n.id === id);
+      if (notification && !notification.read) {
+        markAsRead(id);
+      }
     }
   };
-
-  const filteredNotifications = filter === 'unread'
-    ? notifications.filter(n => !n.read)
-    : notifications;
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -156,84 +163,26 @@ export default function NotificationDetails() {
   return (
     <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
       {/* Header */}
-      <View className={`px-4 py-4 flex-row items-center justify-between shadow-sm ${
+      <View className={`px-4 py-4 flex-row items-center shadow-sm ${
         isDark ? 'bg-gray-800' : 'bg-white'
       }`}>
-        <View className="flex-row items-center flex-1">
-          <TouchableOpacity
-            onPress={() => router.back()}
-            className="w-10 h-10 items-center justify-center mr-3"
-            activeOpacity={0.7}
-          >
-            <Ionicons name="arrow-back" size={24} color={isDark ? '#F9FAFB' : '#374151'} />
-          </TouchableOpacity>
-          <View className="flex-1">
-            <Text className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>
-              Notifications
+        <TouchableOpacity
+          onPress={() => router.back()}
+          className="w-10 h-10 items-center justify-center mr-3"
+          activeOpacity={0.7}
+        >
+          <Ionicons name="arrow-back" size={24} color={isDark ? '#F9FAFB' : '#374151'} />
+        </TouchableOpacity>
+        <View className="flex-1">
+          <Text className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>
+            Notifications {getCurrentYear()}
+          </Text>
+          {unreadCount > 0 && (
+            <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+              {unreadCount} unread
             </Text>
-            {unreadCount > 0 && (
-              <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                {unreadCount} unread
-              </Text>
-            )}
-          </View>
+          )}
         </View>
-
-        {/* Mark All as Read */}
-        {unreadCount > 0 && (
-          <TouchableOpacity
-            onPress={markAllAsRead}
-            className="px-3 py-2"
-            activeOpacity={0.7}
-          >
-            <Text className={`text-sm font-semibold ${
-              isDark ? 'text-blue-400' : 'text-blue-600'
-            }`}>
-              Mark all read
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Filter Tabs */}
-      <View className={`px-4 py-3 flex-row gap-3 ${
-        isDark ? 'bg-gray-800' : 'bg-white'
-      }`}>
-        <TouchableOpacity
-          onPress={() => setFilter('all')}
-          className={`flex-1 py-2 px-4 rounded-lg ${
-            filter === 'all'
-              ? (isDark ? 'bg-primary-500' : 'bg-primary-600')
-              : (isDark ? 'bg-gray-700' : 'bg-gray-100')
-          }`}
-          activeOpacity={0.7}
-        >
-          <Text className={`text-center font-semibold ${
-            filter === 'all'
-              ? 'text-white'
-              : (isDark ? 'text-gray-300' : 'text-gray-700')
-          }`}>
-            All ({notifications.length})
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => setFilter('unread')}
-          className={`flex-1 py-2 px-4 rounded-lg ${
-            filter === 'unread'
-              ? (isDark ? 'bg-primary-500' : 'bg-primary-600')
-              : (isDark ? 'bg-gray-700' : 'bg-gray-100')
-          }`}
-          activeOpacity={0.7}
-        >
-          <Text className={`text-center font-semibold ${
-            filter === 'unread'
-              ? 'text-white'
-              : (isDark ? 'text-gray-300' : 'text-gray-700')
-          }`}>
-            Unread ({unreadCount})
-          </Text>
-        </TouchableOpacity>
       </View>
 
       {/* Notifications List */}
@@ -241,18 +190,20 @@ export default function NotificationDetails() {
         className="flex-1"
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            colors={['#DC2626']}
+            tintColor={isDark ? '#DC2626' : '#DC2626'}
+          />
         }
       >
         <View className="px-4 py-2">
-          {filteredNotifications.length > 0 ? (
-            filteredNotifications.map((notification) => {
+          {notifications.length > 0 ? (
+            notifications.map((notification) => {
               const isExpanded = expandedNotification === notification.id;
               const categoryBadge = getCategoryBadge(notification.category);
-              
-              // Find the notification in the original array to check read status
-              const currentNotification = notifications.find(n => n.id === notification.id);
-              const isRead = currentNotification?.read || false;
+              const isRead = notification.read;
 
               return (
                 <View
@@ -341,60 +292,6 @@ export default function NotificationDetails() {
                       />
                     </View>
                   </TouchableOpacity>
-
-                  {/* Action Buttons */}
-                  {isExpanded && (
-                    <View className={`flex-row border-t px-4 py-3 gap-2 ${
-                      isDark ? 'border-gray-700' : 'border-gray-100'
-                    }`}>
-                      {!isRead && (
-                        <TouchableOpacity
-                          onPress={() => {
-                            markAsRead(notification.id);
-                          }}
-                          className={`flex-1 flex-row items-center justify-center py-2.5 px-4 rounded-lg ${
-                            isDark ? 'bg-blue-500/20' : 'bg-blue-50'
-                          }`}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons
-                            name="checkmark-circle-outline"
-                            size={18}
-                            color={isDark ? '#60A5FA' : '#2563EB'}
-                          />
-                          <Text className={`ml-2 font-semibold text-sm ${
-                            isDark ? 'text-blue-400' : 'text-blue-600'
-                          }`}>
-                            Mark Read
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-
-                      <TouchableOpacity
-                        onPress={() => {
-                          deleteNotification(notification.id);
-                          if (expandedNotification === notification.id) {
-                            setExpandedNotification(null);
-                          }
-                        }}
-                        className={`${!isRead ? 'flex-1' : 'flex-1'} flex-row items-center justify-center py-2.5 px-4 rounded-lg ${
-                          isDark ? 'bg-red-500/20' : 'bg-red-50'
-                        }`}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons
-                          name="trash-outline"
-                          size={18}
-                          color={isDark ? '#F87171' : '#DC2626'}
-                        />
-                        <Text className={`ml-2 font-semibold text-sm ${
-                          isDark ? 'text-red-400' : 'text-red-600'
-                        }`}>
-                          Delete
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
                 </View>
               );
             })
@@ -413,9 +310,7 @@ export default function NotificationDetails() {
               <Text className={`text-sm mt-2 ${
                 isDark ? 'text-gray-500' : 'text-gray-500'
               }`}>
-                {filter === 'unread'
-                  ? 'All caught up! No unread notifications.'
-                  : 'You have no notifications at the moment.'}
+                You have no notifications from {getCurrentYear()}.
               </Text>
             </View>
           )}

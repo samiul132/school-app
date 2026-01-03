@@ -426,6 +426,28 @@ export const getPostNotificationsApi = async () => {
 };
 
 /**
+ * Mark notification as read
+ */
+export const markNotificationAsReadApi = async (notificationId: number) => {
+  return apiRequest(`/post-notifications/${notificationId}/mark-read`, 'POST');
+};
+
+/**
+ * Delete notification
+ */
+export const deleteNotificationApi = async (notificationId: number) => {
+  return apiRequest(`/post-notifications/${notificationId}`, 'DELETE');
+};
+
+/**
+ * Mark all notifications as read
+ */
+export const markAllNotificationsAsReadApi = async () => {
+  return apiRequest('/post-notifications/mark-all-read', 'POST');
+};
+
+
+/**
  * Get all teachers (staff with is_teachers = 1)
  */
 export const getTeachersApi = async () => {
@@ -468,3 +490,42 @@ export const getStudentAttendanceApi = async (classWiseStudentId: number) => {
   const queryString = `?class_wise_student_id=${classWiseStudentId}`;
   return apiRequest(`/student-attendance${queryString}`, 'GET');
 };
+
+
+
+/**
+ * Get all app sliders
+ */
+export const getAppSlidersApi = async () => {
+  return apiRequest('/app-sliders', 'GET');
+};
+
+/**
+ * Helper function to get slider image URL
+ */
+export const getSliderImageUrl = (image: string | null): string | undefined => {
+  if (!image) {
+    return undefined;
+  }
+  
+  if (image.startsWith('http://') || image.startsWith('https://')) {
+    return image;
+  }
+  
+  const baseUrl = API_BASE_URL.replace('/api', '');
+  
+  if (!image.includes('/') && !image.includes('\\')) {
+    return `${baseUrl}/assets/images/app_slider_image/${image}`;
+  }
+  
+  let cleanPath = image.replace(/\\/g, '/');
+  if (cleanPath.startsWith('public/')) {
+    cleanPath = cleanPath.replace('public/', '');
+  }
+  if (cleanPath.startsWith('/')) {
+    cleanPath = cleanPath.substring(1);
+  }
+  
+  return `${baseUrl}/${cleanPath}`;
+};
+

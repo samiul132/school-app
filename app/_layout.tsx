@@ -80,6 +80,12 @@ export default function RootLayout() {
           }} 
         />
         <Stack.Screen 
+          name="subjects" 
+          options={{ 
+            headerShown: false 
+          }} 
+        />
+        <Stack.Screen 
           name="classroutine" 
           options={{ 
             headerShown: false 

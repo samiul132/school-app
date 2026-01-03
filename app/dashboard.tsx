@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
   useColorScheme,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import type { Href } from 'expo-router';
@@ -16,12 +17,20 @@ import {
   getStudentProfileByIdApi, 
   getUserData,
   getStudentFeeSummaryApi,
-  apiRequest
+  apiRequest,
+  getAppSlidersApi,
+  getSliderImageUrl,
 } from '../config/api';
 
 import '../global.css';
 
 const { width } = Dimensions.get('window');
+
+interface AppSlider {
+  id: number;
+  title: string;
+  image: string;
+}
 
 export default function DashboardScreen() {
   const colorScheme = useColorScheme();
@@ -36,10 +45,18 @@ export default function DashboardScreen() {
   });
   const [todaysClasses, setTodaysClasses] = useState<any[]>([]);
   const [attendancePercentage, setAttendancePercentage] = useState('0');
+  const [sliderImages, setSliderImages] = useState<AppSlider[]>([]);
+  const [loadingSliders, setLoadingSliders] = useState(true);
 
   useEffect(() => {
     loadUserData();
-    
+    loadSliders();
+  }, []);
+
+  useEffect(() => {
+    // Only start auto-scroll if we have sliders
+    if (sliderImages.length === 0) return;
+
     const interval = setInterval(() => {
       setCurrentSlide((prev) => {
         const next = (prev + 1) % sliderImages.length;
@@ -52,7 +69,63 @@ export default function DashboardScreen() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [sliderImages.length]);
+
+  const loadSliders = async () => {
+    try {
+      setLoadingSliders(true);
+      const response = await getAppSlidersApi();
+      
+      if (response.success && response.data) {
+        let slidersData = [];
+        
+        // Handle different response structures
+        if (Array.isArray(response.data)) {
+          slidersData = response.data;
+        } else if (response.data.data && Array.isArray(response.data.data)) {
+          slidersData = response.data.data;
+        } else if (response.data.data) {
+          slidersData = [response.data.data];
+        } else {
+          slidersData = [response.data];
+        }
+        
+        if (slidersData.length > 0) {
+          setSliderImages(slidersData);
+        } else {
+          // Fallback to default sliders if no data
+          setSliderImages([
+            {
+              id: 1,
+              title: 'Welcome to School',
+              image: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800',
+            },
+          ]);
+        }
+      } else {
+        // Fallback to default sliders if API fails
+        setSliderImages([
+          {
+            id: 1,
+            title: 'Welcome to School',
+            image: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800',
+          },
+        ]);
+      }
+    } catch (error) {
+      console.error('Error loading sliders:', error);
+      // Fallback to default sliders
+      setSliderImages([
+        {
+          id: 1,
+          title: 'Welcome to School',
+          image: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800',
+        },
+      ]);
+    } finally {
+      setLoadingSliders(false);
+    }
+  };
 
   const loadUserData = async () => {
     try {
@@ -151,17 +224,14 @@ export default function DashboardScreen() {
             : [response.data];
         }
         
-        // Find routine matching student's class and section
         const studentRoutine = routinesData.find(
           (routine: any) => routine.class_id === classId && routine.section_id === sectionId
         );
         
         if (studentRoutine && studentRoutine.details) {
-          // Get current day name
           const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
           const today = days[new Date().getDay()];
           
-          // Check if today is an off day
           const offDays = studentRoutine.off_day 
             ? studentRoutine.off_day.split(',').map((d: string) => d.trim()) 
             : [];
@@ -173,13 +243,11 @@ export default function DashboardScreen() {
             return;
           }
           
-          // Filter details for today
           const todayDetails = studentRoutine.details.filter(
             (detail: any) => detail.day_name === today
           );
           
           if (todayDetails.length > 0) {
-            // Sort by period number
             const sortedDetails = todayDetails.sort((a: any, b: any) => 
               parseInt(String(a.period_number)) - parseInt(String(b.period_number))
             );
@@ -216,6 +284,7 @@ export default function DashboardScreen() {
 
   const handleRefresh = async () => {
     await loadUserData();
+    await loadSliders();
   };
 
   const handleCardClick = (cardId: number) => {
@@ -266,28 +335,10 @@ export default function DashboardScreen() {
   ];
 
   const quickActions = [
-    { id: 1, title: 'Timetable', icon: 'time', color: isDark ? '#EF4444' : '#DC2626' },
-    { id: 2, title: 'Results', icon: 'clipboard', color: '#16A34A' },
-    { id: 3, title: 'Pay Fees', icon: 'card', color: '#2563EB' },
-    { id: 4, title: 'Materials', icon: 'book-outline', color: '#F59E0B' },
-  ];
-
-  const sliderImages = [
-    {
-      id: 1,
-      uri: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800',
-      title: 'Welcome to School',
-    },
-    {
-      id: 2,
-      uri: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=800',
-      title: 'Learning Together',
-    },
-    {
-      id: 3,
-      uri: 'https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?w=800',
-      title: 'Bright Future',
-    },
+    { id: 1, title: 'Timetable', icon: 'time', color: isDark ? '#EF4444' : '#DC2626', route: '/upcooming' },
+    { id: 2, title: 'Results', icon: 'clipboard', color: '#16A34A', route: '/upcooming' },
+    { id: 3, title: 'Pay Fees', icon: 'card', color: '#2563EB', route: '/fees' },
+    { id: 4, title: 'Subjects', icon: 'book-outline', color: '#F59E0B', route: '/subjects' },
   ];
 
   return (
@@ -518,6 +569,7 @@ export default function DashboardScreen() {
               }`}
               style={{ minHeight: 120 }}
               activeOpacity={0.7}
+              onPress={() => router.push(action.route as Href)}
             >
               <View
                 className="rounded-xl w-14 h-14 items-center justify-center mb-3"
@@ -538,64 +590,100 @@ export default function DashboardScreen() {
           ))}
         </View>
 
-        {/* Image Slider */}
+        {/* Image Slider - Dynamic from API */}
         <Text className={`text-xl font-bold mx-4 mt-6 mb-4 ${
           isDark ? 'text-white' : 'text-gray-900'
         }`}>
           Announcements
         </Text>
 
-        <View className="mx-4">
-          <ScrollView
-            ref={scrollViewRef}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            onScroll={(event) => {
-              const slideIndex = Math.round(
-                event.nativeEvent.contentOffset.x / (width - 32)
-              );
-              setCurrentSlide(slideIndex);
-            }}
-            scrollEventThrottle={16}
-          >
-            {sliderImages.map((image) => (
-              <View
-                key={image.id}
-                className="rounded-2xl overflow-hidden"
-                style={{ width: width - 32, marginRight: 0 }}
-              >
-                <Image
-                  source={{ uri: image.uri }}
-                  className="w-full h-48"
-                  resizeMode="cover"
-                />
-                <View className={`absolute bottom-0 left-0 right-0 p-4 ${
-                  isDark ? 'bg-gray-900/80' : 'bg-white/80'
-                }`}>
-                  <Text className={`text-lg font-bold ${
-                    isDark ? 'text-white' : 'text-gray-900'
-                  }`}>
-                    {image.title}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </ScrollView>
-
-          <View className="flex-row justify-center items-center mt-3 gap-2">
-            {sliderImages.map((_, index) => (
-              <View
-                key={index}
-                className={`h-2 rounded-full ${
-                  currentSlide === index
-                    ? `w-6 ${isDark ? 'bg-primary-500' : 'bg-primary-600'}`
-                    : `w-2 ${isDark ? 'bg-gray-700' : 'bg-gray-300'}`
-                }`}
-              />
-            ))}
+        {loadingSliders ? (
+          <View className="mx-4 h-48 rounded-2xl bg-gray-200 items-center justify-center">
+            <ActivityIndicator size="large" color="#DC2626" />
           </View>
-        </View>
+        ) : sliderImages.length > 0 ? (
+          <View className="mx-4">
+            <ScrollView
+              ref={scrollViewRef}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onScroll={(event) => {
+                const slideIndex = Math.round(
+                  event.nativeEvent.contentOffset.x / (width - 32)
+                );
+                setCurrentSlide(slideIndex);
+              }}
+              scrollEventThrottle={16}
+            >
+              {sliderImages.map((slider) => {
+                const imageUrl = getSliderImageUrl(slider.image);
+                
+                return (
+                  <View
+                    key={slider.id}
+                    className="rounded-2xl overflow-hidden"
+                    style={{ width: width - 32, marginRight: 0 }}
+                  >
+                    {imageUrl ? (
+                      <Image
+                        source={{ uri: imageUrl }}
+                        className="w-full h-48"
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View className={`w-full h-48 items-center justify-center ${
+                        isDark ? 'bg-gray-700' : 'bg-gray-200'
+                      }`}>
+                        <Ionicons name="image-outline" size={48} color={isDark ? '#4B5563' : '#9CA3AF'} />
+                        <Text className={`mt-2 text-sm ${
+                          isDark ? 'text-gray-400' : 'text-gray-600'
+                        }`}>No Image</Text>
+                      </View>
+                    )}
+                    <View className={`absolute bottom-0 left-0 right-0 p-4 ${
+                      isDark ? 'bg-gray-900/80' : 'bg-white/80'
+                    }`}>
+                      <Text className={`text-lg font-bold ${
+                        isDark ? 'text-white' : 'text-gray-900'
+                      }`}>
+                        {slider.title}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            <View className="flex-row justify-center items-center mt-3 gap-2">
+              {sliderImages.map((_, index) => (
+                <View
+                  key={index}
+                  className={`h-2 rounded-full ${
+                    currentSlide === index
+                      ? `w-6 ${isDark ? 'bg-primary-500' : 'bg-primary-600'}`
+                      : `w-2 ${isDark ? 'bg-gray-700' : 'bg-gray-300'}`
+                  }`}
+                />
+              ))}
+            </View>
+          </View>
+        ) : (
+          <View className={`mx-4 rounded-2xl p-8 items-center ${
+            isDark ? 'bg-gray-800' : 'bg-gray-100'
+          }`}>
+            <Ionicons 
+              name="images-outline" 
+              size={48} 
+              color={isDark ? '#6B7280' : '#9CA3AF'} 
+            />
+            <Text className={`mt-3 text-sm ${
+              isDark ? 'text-gray-400' : 'text-gray-600'
+            }`}>
+              No announcements available
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </CommonLayout>
   );

@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { Href } from 'expo-router';
 import { useRouter } from 'expo-router';
 import { ReactNode, useEffect, useState } from 'react';
-import { getPostNotificationsApi } from '../config/api';
+import { getPostNotificationsApi, markNotificationAsReadApi } from '../config/api';
 import {
   Alert,
   Image,
@@ -10,7 +10,7 @@ import {
   Modal,
   RefreshControl,
   ScrollView,
-  StatusBar,  // এটি import করুন
+  StatusBar,
   Text,
   TouchableOpacity,
   View,
@@ -46,7 +46,7 @@ export default function CommonLayout({
   const [menuOpen, setMenuOpen] = useState(false);
   const [schoolInfoOpen, setSchoolInfoOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
-  const [notificationCount, setNotificationCount] = useState(3);
+  const [notificationCount, setNotificationCount] = useState(0);
   const [userData, setUserData] = useState<any>(null);
   const [schoolSettings, setSchoolSettings] = useState<SchoolSettings | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -60,18 +60,21 @@ export default function CommonLayout({
     try {
       const response = await getPostNotificationsApi();
       if (response.success && response.data) {
-        const formattedNotifications = response.data.map((item: any, index: number) => ({
-          id: item.id,
-          title: item.name,
-          message: item.description || 'New notification',
-          time: getTimeAgo(item.created_at),
-          read: false,
-          icon: 'notifications-outline',
-          iconColor: index % 3 === 0 ? '#DC2626' : index % 3 === 1 ? '#2563EB' : '#16A34A',
-        }));
+        // Filter only unread notifications
+        const unreadNotifications = response.data
+          .filter((item: any) => !item.is_read)
+          .map((item: any, index: number) => ({
+            id: item.id,
+            title: item.name,
+            message: item.description || 'New notification',
+            time: getTimeAgo(item.created_at),
+            read: false,
+            icon: 'notifications-outline',
+            iconColor: index % 3 === 0 ? '#DC2626' : index % 3 === 1 ? '#2563EB' : '#16A34A',
+          }));
         
-        setNotifications(formattedNotifications);
-        setNotificationCount(formattedNotifications.length);
+        setNotifications(unreadNotifications);
+        setNotificationCount(unreadNotifications.length);
       }
     } catch (error) {
       console.error('Error loading notifications:', error);
@@ -88,6 +91,26 @@ export default function CommonLayout({
     if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
     if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
     return date.toLocaleDateString();
+  };
+
+  const handleNotificationClick = async (notificationId: number) => {
+    try {
+      // Mark notification as read
+      await markNotificationAsReadApi(notificationId);
+      
+      // Remove from unread list
+      setNotifications(prev => prev.filter(n => n.id !== notificationId));
+      setNotificationCount(prev => Math.max(0, prev - 1));
+      
+      // Close modal and navigate
+      setNotificationOpen(false);
+      router.push('/notificationdetails' as Href);
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+      // Still navigate even if marking fails
+      setNotificationOpen(false);
+      router.push('/notificationdetails' as Href);
+    }
   };
 
   useEffect(() => {
@@ -234,7 +257,6 @@ export default function CommonLayout({
 
   return (
     <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-      {/* Status Bar - এটি যোগ করুন */}
       <StatusBar
         barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor={isDark ? '#1F2937' : '#FFFFFF'}
@@ -567,17 +589,14 @@ export default function CommonLayout({
                 showsVerticalScrollIndicator={false}
               >
                 {notifications.length > 0 ? (
-                  notifications.map((notification, index) => (
+                  notifications.map((notification) => (
                     <TouchableOpacity
                       key={notification.id}
                       className={`px-4 py-4 border-b ${
-                        isDark ? 'border-gray-700' : 'border-gray-100'
-                      } ${!notification.read ? (isDark ? 'bg-gray-700/30' : 'bg-blue-50/50') : ''}`}
+                        isDark ? 'border-gray-700 bg-gray-700/30' : 'border-gray-100 bg-blue-50/50'
+                      }`}
                       activeOpacity={0.7}
-                      onPress={() => {
-                        setNotificationOpen(false);
-                        router.push('/notificationdetails' as Href);
-                      }}
+                      onPress={() => handleNotificationClick(notification.id)}
                     >
                       <View className="flex-row items-start">
                         <View 
@@ -597,9 +616,7 @@ export default function CommonLayout({
                             }`}>
                               {notification.title}
                             </Text>
-                            {!notification.read && (
-                              <View className="w-2 h-2 bg-blue-500 rounded-full ml-2 mt-1" />
-                            )}
+                            <View className="w-2 h-2 bg-blue-500 rounded-full ml-2 mt-1" />
                           </View>
                           <Text className={`text-sm mb-1 ${
                             isDark ? 'text-gray-400' : 'text-gray-600'
@@ -625,31 +642,29 @@ export default function CommonLayout({
                     <Text className={`text-base mt-2 ${
                       isDark ? 'text-gray-400' : 'text-gray-600'
                     }`}>
-                      No notifications
+                      No unread notifications
                     </Text>
                   </View>
                 )}
               </ScrollView>
 
               {/* Footer - View More */}
-              {notifications.length > 0 && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setNotificationOpen(false);
-                    router.push('/notificationdetails' as Href);
-                  }}
-                  className={`px-4 py-4 border-t items-center ${
-                    isDark ? 'border-gray-700 bg-gray-700/30' : 'border-gray-200 bg-gray-50'
-                  }`}
-                  activeOpacity={0.7}
-                >
-                  <Text className={`text-sm font-semibold ${
-                    isDark ? 'text-blue-400' : 'text-blue-600'
-                  }`}>
-                    View More
-                  </Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                onPress={() => {
+                  setNotificationOpen(false);
+                  router.push('/notificationdetails' as Href);
+                }}
+                className={`px-4 py-4 border-t items-center ${
+                  isDark ? 'border-gray-700 bg-gray-700/30' : 'border-gray-200 bg-gray-50'
+                }`}
+                activeOpacity={0.7}
+              >
+                <Text className={`text-sm font-semibold ${
+                  isDark ? 'text-blue-400' : 'text-blue-600'
+                }`}>
+                  View All Notifications
+                </Text>
+              </TouchableOpacity>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
